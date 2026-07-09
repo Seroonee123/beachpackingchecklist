@@ -736,7 +736,15 @@ const SUPABASE_URL = 'https://yiqqqteaivciqputsyhc.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_x9ZLqdxD4cEPSUrJf5aebw_12Y8rsq0';
 
 const syncEnabled = SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY.length > 20;
-const supabase = (syncEnabled && window.supabase) ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+let supabaseClient = null;
+if (syncEnabled && window.supabase) {
+  try {
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  } catch (e) {
+    console.warn('Supabase client failed to initialise — running in local-only mode.', e);
+    supabaseClient = null;
+  }
+}
 
 // ─── LIST CODE (identifies this checklist across devices) ─────────────────
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O/1/I/L — avoids confusion when typed by hand
@@ -886,7 +894,7 @@ function saveState() {
 // ─── CROSS-DEVICE SYNC ──────────────────────────────────────────────────────
 let syncTimer = null;
 function scheduleSync() {
-  if (!syncEnabled) { setSyncStatus('local'); return; }
+  if (!supabaseClient) { setSyncStatus('local'); return; }
   setSyncStatus('saving');
   clearTimeout(syncTimer);
   syncTimer = setTimeout(pushToSupabase, 700);
@@ -894,7 +902,7 @@ function scheduleSync() {
 
 async function pushToSupabase() {
   try {
-    const { error } = await supabase.from('checklists').upsert({
+    const { error } = await supabaseClient.from('checklists').upsert({
       code: LIST_CODE,
       data: state,
       updated_at: new Date().toISOString()
@@ -908,10 +916,10 @@ async function pushToSupabase() {
 }
 
 async function initSync() {
-  if (!syncEnabled) { setSyncStatus('local'); return; }
+  if (!supabaseClient) { setSyncStatus('local'); return; }
   setSyncStatus('loading');
   try {
-    const { data: row, error } = await supabase.from('checklists').select('data').eq('code', LIST_CODE).maybeSingle();
+    const { data: row, error } = await supabaseClient.from('checklists').select('data').eq('code', LIST_CODE).maybeSingle();
     if (error) throw error;
     if (row && row.data) {
       Object.assign(state, row.data);
@@ -1252,10 +1260,14 @@ function showToast(msg) {
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 document.getElementById('footerYear').textContent = new Date().getFullYear();
-document.getElementById('listCodeLabel').textContent = LIST_CODE;
 if (state.destination) document.getElementById('destination').value = state.destination;
 refreshInsight();
 render();
+try {
+  document.getElementById('listCodeLabel').textContent = LIST_CODE;
+} catch (e) {
+  console.warn('Could not display list code.', e);
+}
 initSync();
 
 // CSS pulse for AI loading dot
